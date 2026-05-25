@@ -4,8 +4,6 @@
 
 Built with [n8n](https://n8n.io), Google Gemini, and Gmail — self-hosted, free to run, reviewer-friendly to set up.
 
-Demo video is submitted separately.
-
 ---
 
 ## Quick start
@@ -274,17 +272,33 @@ Leave **Discord: Webhook Notification (Fallback)** disabled unless Slack setup i
 
 ### 9. Test it
 
-Send yourself an email like:
+Send yourself emails from another account to exercise the three main paths. Run **Execute Workflow** after each one arrives in your inbox.
+
+**Example 1 — actionable, needs reply (high priority)**
 
 > **Subject:** Quick question about Tuesday
 > **Body:** Can you confirm we're still meeting at 3pm to go over the proposal?
 
-In n8n → **Execute Workflow** (bottom of canvas).
+Expect: `AI/Needs Reply` label, threaded Gmail draft created, Slack notification fires.
 
-Verify:
-- ✅ **Gmail Drafts** → threaded reply created
-- ✅ **Original email** → has an `AI/...` label
-- ✅ **Slack channel** → summary message posted
+**Example 2 — informational, no reply needed (low priority)**
+
+> **Subject:** Receipt for your Stripe payment
+> **Body:** Thanks for your payment of $49 to Acme Co. Your receipt is attached.
+
+Expect: `AI/FYI` label applied, **no draft**, **no Slack notification** (priority < 3 + needs_reply=false).
+
+**Example 3 — promotional / noise**
+
+> **Subject:** 50% off all annual plans this week only
+> **Body:** Limited-time offer for new subscribers...
+
+Expect: `AI/Ignore` label, no draft, no Slack — and most of the time this gets filtered out by the Gmail Trigger's `-category:promotions` filter before it even reaches the workflow.
+
+Verify after each:
+- ✅ **Gmail Drafts** → reply present only for actionable cases
+- ✅ **Original email** → correct `AI/...` label
+- ✅ **Slack channel** → only the high-priority case rings; the others stay quiet
 
 ### 10. Activate
 
