@@ -2,7 +2,7 @@
 
 **An AI-powered inbox triage agent. It reads, classifies, drafts a reply, and only interrupts you when something actually needs you.**
 
-Built with [n8n](https://n8n.io), Google Gemini, and Gmail — self-hosted, free to run, reviewer-friendly to set up.
+Built with [n8n](https://n8n.io), Google Gemini, and Gmail. Self-hosted, free to run, reviewer-friendly to set up.
 
 ---
 
@@ -21,7 +21,7 @@ n8n boots on **http://localhost:5678**. Create an owner account, then follow [Ru
 
 ## The problem
 
-Inboxes don't scale. Most "AI inbox" tools just move the noise — you go from 50 unread emails to 50 Slack pings saying "you have unread emails." That's not automation, that's a fancier todo list.
+Inboxes don't scale. Most "AI inbox" tools just move the noise. You go from 50 unread emails to 50 Slack pings saying "you have unread emails." That's not automation, that's a fancier todo list.
 
 ## The approach
 
@@ -49,11 +49,11 @@ Here the AI writes the reply directly into a **threaded Gmail draft** attached t
 
 ### 2. Priority gates notifications, so the workflow reduces attention cost
 
-The AI sets a `slack_notify` flag and a `priority 1–5`. Slack only fires for priority ≥ 3 or AI-flagged urgent. Newsletters, automated alerts, and FYI receipts get a quiet Gmail label — never a ping. Notifications get *fewer* the more you use this, not more.
+The AI sets a `slack_notify` flag and a `priority 1–5`. Slack only fires for priority ≥ 3 or AI-flagged urgent. Newsletters, automated alerts, and FYI receipts get a quiet Gmail label, never a ping. Notifications get *fewer* the more you use this, not more.
 
 ### 3. Structured output enforcement with an auditable reasoning field
 
-Gemini returns strict JSON: `category`, `priority`, `summary`, `needs_reply`, `suggested_reply`, `gmail_label`, `slack_notify`, and — critically — a `reasoning` field. Every classification is one-sentence-explainable. Useful for debugging, demoing, and trusting the system.
+Gemini returns strict JSON: `category`, `priority`, `summary`, `needs_reply`, `suggested_reply`, `gmail_label`, `slack_notify`, and a `reasoning` field. Every classification is one-sentence-explainable. Useful for debugging, demoing, and trusting the system.
 
 ### 4. Production-grade email body parsing, not vibes
 
@@ -117,9 +117,9 @@ The Code node decodes base64url-encoded MIME parts, walks nested multipart struc
 | Component | Choice | Why |
 |---|---|---|
 | **Workflow engine** | n8n Community Edition, self-hosted via Docker | Free, unlimited executions, owns the data, deploys anywhere. n8n Cloud's free tier was removed; Starter (\$24/mo) caps at 2,500 executions per month, which a polling workflow exhausts quickly. |
-| **LLM** | Google Gemini 2.5 Flash-Lite | Free-tier friendly and fast. Task is bounded — classify, summarize, short reply — so Flash-Lite is the right tier. The Structured Output Parser constrains format, drafts are human-reviewed before sending. |
+| **LLM** | Google Gemini 2.5 Flash-Lite | Free-tier friendly and fast. Task is bounded (classify, summarize, short reply), so Flash-Lite is the right tier. The Structured Output Parser constrains format, drafts are human-reviewed before sending. |
 | **Email I/O** | Gmail OAuth 2.0 | Native n8n node, supports threaded drafts and label application. |
-| **Notifications** | Slack Incoming Webhook (via HTTP Request node) | Simpler than Slack OAuth — the webhook URL is the auth. Discord webhook is a one-node swap if Slack workspace is restricted. |
+| **Notifications** | Slack Incoming Webhook (via HTTP Request node) | Simpler than Slack OAuth. The webhook URL is the auth. Discord webhook is a one-node swap if Slack workspace is restricted. |
 
 ---
 
@@ -151,12 +151,12 @@ The assessment is graded on judgment, not feature count. Each of the items below
 - **Calendar availability check** — if an email mentions a meeting time, the AI could cross-reference Google Calendar. Useful, but adds another OAuth flow and another credential for the reviewer to set up.
 - **Persistent sender memory** — track past senders to detect VIPs, recurring threads, or frequent contacts. Useful, but needs a DB layer and a lookup step.
 - **RAG over sent emails** — match the user's writing style by retrieving similar past sends as in-context examples. Useful, but adds embedding storage and a vector DB.
-- **Auto-send replies** — the AI's reply lands as a draft, never an outgoing message. Auto-send would multiply the cost of any AI mistake. Drafts force human review — the right tradeoff for v1.
+- **Auto-send replies** — the AI's reply lands as a draft, never an outgoing message. Auto-send would multiply the cost of any AI mistake. Drafts force human review, which is the right tradeoff for v1.
 
 ## What I'd add for production
 
 - **n8n Error Trigger workflow** to catch failures (Gemini timeout, Gmail OAuth expired, Slack 5xx) and route them to a dedicated logging channel with retry. The current workflow fails individual executions on error; production needs visibility and resilience.
-- **Multi-account routing** with a credential-per-row table for team deployments — one workflow, many inboxes.
+- **Multi-account routing** with a credential-per-row table for team deployments: one workflow, many inboxes.
 - **Published OAuth consent screen** (after Google's verification process) so refresh tokens don't periodically expire.
 - **Sender allowlist/denylist** for finer control over what gets processed.
 
@@ -233,7 +233,7 @@ When the popup opens:
 1. **https://api.slack.com/apps** → **Create New App** → **From scratch** → pick workspace
 2. Left sidebar → **Incoming Webhooks** → toggle **On**
 3. **Add New Webhook to Workspace** → pick a channel → **Allow**
-4. Copy the URL — paste it into a notes app (not into n8n's credential vault, we use it differently)
+4. Copy the URL and paste it into a notes app (not into n8n's credential vault, we use it differently)
 
 ### 5. Create the 4 Gmail labels
 
@@ -293,7 +293,7 @@ Expect: `AI/FYI` label applied, **no draft**, **no Slack notification** (priorit
 > **Subject:** 50% off all annual plans this week only
 > **Body:** Limited-time offer for new subscribers...
 
-Expect: `AI/Ignore` label, no draft, no Slack — and most of the time this gets filtered out by the Gmail Trigger's `-category:promotions` filter before it even reaches the workflow.
+Expect: `AI/Ignore` label, no draft, no Slack. Most of the time this gets filtered out by the Gmail Trigger's `-category:promotions` filter before it even reaches the workflow.
 
 Verify after each:
 - ✅ **Gmail Drafts** → reply present only for actionable cases
