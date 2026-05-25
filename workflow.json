@@ -1,0 +1,523 @@
+{
+  "name": "Email Intelligence Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 5,
+              "unit": "minutes"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "readStatus": "unread",
+          "q": "-category:promotions -category:social -category:updates",
+          "includeSpamTrash": false
+        },
+        "options": {}
+      },
+      "id": "node-001-gmail-trigger",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "__REBIND_GMAIL_OAUTH__",
+          "name": "Gmail OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $json;\n\nfunction decodeBase64Url(value = \"\") {\n  if (!value) return \"\";\n  const normalized = value.replace(/-/g, \"+\").replace(/_/g, \"/\");\n  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, \"=\");\n  const binary = atob(padded);\n  const bytes = Array.from(binary, char =>\n    `%${char.charCodeAt(0).toString(16).padStart(2, \"0\")}`\n  ).join(\"\");\n\n  return decodeURIComponent(bytes);\n}\n\nfunction htmlToText(html = \"\") {\n  return html\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, \" \")\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, \" \")\n    .replace(/<br\\s*\\/?>/gi, \"\\n\")\n    .replace(/<\\/p>/gi, \"\\n\")\n    .replace(/<[^>]+>/g, \" \")\n    .replace(/&nbsp;/g, \" \")\n    .replace(/&amp;/g, \"&\")\n    .replace(/&lt;/g, \"<\")\n    .replace(/&gt;/g, \">\")\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;/g, \"'\");\n}\n\nfunction collectParts(part, out = { text: [], html: [] }) {\n  if (!part) return out;\n  const mimeType = part.mimeType || \"\";\n  const data = part.body?.data;\n  if (data && mimeType.includes(\"text/plain\")) out.text.push(decodeBase64Url(data));\n  if (data && mimeType.includes(\"text/html\")) out.html.push(htmlToText(decodeBase64Url(data)));\n  for (const child of part.parts || []) collectParts(child, out);\n  return out;\n}\n\nfunction header(name) {\n  const wanted = name.toLowerCase();\n  const headers = item.payload?.headers || item.headers || [];\n\n  if (Array.isArray(headers)) {\n    return headers.find(h => h.name?.toLowerCase() === wanted)?.value || \"\";\n  }\n\n  if (headers && typeof headers === \"object\") {\n    return headers[name] || headers[wanted] || headers[name.toUpperCase()] || \"\";\n  }\n\n  return \"\";\n}\n\nfunction parseFrom(value = \"\") {\n  if (!value) return { name: \"\", email: \"\" };\n\n  if (typeof value === \"object\") {\n    const first = value.value?.[0] || value;\n    const email = first.address || first.email || value.address || value.email || \"\";\n    const name = first.name || value.name || \"\";\n\n    if (email) {\n      return {\n        name: String(name).trim(),\n        email: String(email).trim(),\n      };\n    }\n\n    value = value.text || value.html || \"\";\n  }\n\n  const raw = String(value).trim();\n  const emailMatch = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\n\n  if (emailMatch) {\n    const email = emailMatch[0];\n    const name = raw\n      .replace(email, \"\")\n      .replace(/^From:\\s*/i, \"\")\n      .replace(/[<>\"']/g, \"\")\n      .trim();\n\n    return { name, email };\n  }\n\n  const text = raw.replace(/^From:\\s*/i, \"\").replace(/<[^>]*>/g, \"\").trim();\n  const match = text.match(/^(?:\"?([^\"<]*)\"?\\s)?<?([^<>\\s]+@[^<>\\s]+)>?$/);\n\n  return {\n    name: (match?.[1] || \"\").trim(),\n    email: (match?.[2] || \"\").trim(),\n  };\n}\n\nconst parts = collectParts(item.payload);\nconst rawBody = (\n  parts.text.join(\"\\n\") ||\n  item.text ||\n  item.textPlain ||\n  parts.html.join(\"\\n\") ||\n  htmlToText(item.html || item.textAsHtml || \"\") ||\n  item.snippet ||\n  \"\"\n).trim();\nconst quotedRegex = /^On .+ wrote:[\\s\\S]*$/m;\nconst sigSplit = rawBody.split(/\\n-- ?\\n/);\n\nconst body_clean = sigSplit[0]\n  .replace(quotedRegex, \"\")\n  .replace(/^>.*$/gm, \"\")\n  .replace(/\\n{3,}/g, \"\\n\\n\")\n  .trim();\n\nconst from = parseFrom(\n  header(\"Reply-To\") ||\n  header(\"From\") ||\n  header(\"Return-Path\") ||\n  item.replyTo ||\n  item.from ||\n  item.sender ||\n  \"\"\n);\n\nif (!from.email) {\n  throw new Error(\"Could not extract a valid sender email address from the Gmail message.\");\n}\n\nreturn {\n  json: {\n    from_email: from.email || \"\",\n    from_name: from.name || \"\",\n    subject: header(\"Subject\") || item.subject || \"(no subject)\",\n    date: header(\"Date\") || item.date || item.internalDate,\n    thread_id: item.threadId,\n    message_id: item.id,\n    rfc_message_id: header(\"Message-ID\"),\n    body_clean,\n  },\n};"
+      },
+      "id": "node-002-code-cleanup",
+      "name": "Code: Clean Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=From: {{ $json.from_name }} <{{ $json.from_email }}>\nSubject: {{ $json.subject }}\nDate: {{ $json.date }}\n\n{{ $json.body_clean }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are an executive email assistant.\n\nFor each incoming email, you will:\n1. Classify it (category, priority 1-5)\n2. Decide whether it needs a reply\n3. Write a one-paragraph summary (<= 2 sentences, no fluff)\n4. Draft a suggested response when a reply is useful; otherwise write \"No reply recommended.\"\n5. Choose the Gmail triage label and whether Slack should be notified\n\nTone rules:\n- Professional, direct, no filler openings (\"Hope you're well\", etc.)\n- Match the formality of the incoming email\n- NEVER invent facts. If the email asks about something you don't have context for, write [needs detail from user] in that part of the reply instead of guessing.\n- Keep replies under 120 words unless the email genuinely requires more\n- For promotional, spam, or no-content emails, set suggested_reply to an empty string.\n\nPriority scale:\n  5 = blocker / urgent / time-bound today\n  4 = important, needs reply within 24h\n  3 = normal business, this week\n  2 = FYI / no action needed\n  1 = newsletter / promotional / automated\n\nCategories: actionable | informational | promotional | automated | spam\n\nGmail labels:\n  AI/Urgent = priority 5 or time-bound today\n  AI/Needs Reply = actionable and needs_reply is true\n  AI/FYI = useful but no reply needed\n  AI/Ignore = promotional, automated noise, spam, or no useful content\n\nSet slack_notify=true only for priority >= 3 or time-bound messages.\n\nReturn ONLY the JSON object matching the provided schema. No prose outside the JSON."
+        }
+      },
+      "id": "node-003-ai-agent",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash-lite",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "node-003a-gemini-model",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        660,
+        520
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "__REBIND_GEMINI__",
+          "name": "Gemini AI Studio"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"additionalProperties\": false,\n  \"required\": [\n    \"category\",\n    \"priority\",\n    \"summary\",\n    \"needs_reply\",\n    \"suggested_reply\",\n    \"gmail_label\",\n    \"slack_notify\",\n    \"reasoning\"\n  ],\n  \"properties\": {\n    \"category\": {\n      \"type\": \"string\",\n      \"enum\": [\"actionable\", \"informational\", \"promotional\", \"automated\", \"spam\"]\n    },\n    \"priority\": {\n      \"type\": \"integer\",\n      \"minimum\": 1,\n      \"maximum\": 5\n    },\n    \"summary\": {\n      \"type\": \"string\",\n      \"description\": \"Maximum two sentences.\"\n    },\n    \"needs_reply\": {\n      \"type\": \"boolean\"\n    },\n    \"suggested_reply\": {\n      \"type\": \"string\",\n      \"description\": \"Draft text for useful emails that need a reply, 'No reply recommended.' for useful no-reply emails, and empty string for spam/promotional/no-content emails.\"\n    },\n    \"gmail_label\": {\n      \"type\": \"string\",\n      \"enum\": [\"AI/Needs Reply\", \"AI/Urgent\", \"AI/FYI\", \"AI/Ignore\"]\n    },\n    \"slack_notify\": {\n      \"type\": \"boolean\",\n      \"description\": \"True only for priority >= 3 or urgent/time-bound messages.\"\n    },\n    \"reasoning\": {\n      \"type\": \"string\",\n      \"description\": \"One sentence explaining the category and priority.\"\n    }\n  }\n}"
+      },
+      "id": "node-003b-output-parser",
+      "name": "Structured Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        840,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "addLabels",
+        "messageId": "={{ $('Code: Clean Body').item.json.message_id }}",
+        "labelIds": "={{ [$json.id] }}"
+      },
+      "id": "node-004-add-label",
+      "name": "Gmail: Add Label",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1400,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "__REBIND_GMAIL_OAUTH__",
+          "name": "Gmail OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-cat-actionable",
+              "leftValue": "={{ $('AI Agent').item.json.output.category }}",
+              "rightValue": "actionable",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "cond-needs-reply",
+              "leftValue": "={{ $('AI Agent').item.json.output.needs_reply }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-005-if-needs-reply",
+      "name": "IF: Needs Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1620,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "operation": "create",
+        "subject": "={{ 'Re: ' + $('Code: Clean Body').item.json.subject.replace(/^Re:\\s*/i, '') }}",
+        "emailType": "text",
+        "message": "={{ $('AI Agent').item.json.output.suggested_reply }}",
+        "options": {
+          "sendTo": "={{ $('Code: Clean Body').item.json.from_email }}",
+          "threadId": "={{ $('Code: Clean Body').item.json.thread_id }}"
+        }
+      },
+      "id": "node-006-create-draft",
+      "name": "Gmail: Create Draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1860,
+        180
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "__REBIND_GMAIL_OAUTH__",
+          "name": "Gmail OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-notify-a",
+              "leftValue": "={{ $('AI Agent').item.json.output.slack_notify || $('AI Agent').item.json.output.priority >= 3 }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-007a-if-notify-a",
+      "name": "IF: Notify? (after draft)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2100,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-notify-b",
+              "leftValue": "={{ $('AI Agent').item.json.output.slack_notify || $('AI Agent').item.json.output.priority >= 3 }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-007b-if-notify-b",
+      "name": "IF: Notify? (no draft)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1860,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "__REPLACE_WITH_SLACK_WEBHOOK_URL__",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"*New email — priority {{ $('AI Agent').item.json.output.priority }}/5*\\nFrom: {{ $('Code: Clean Body').item.json.from_name }} <{{ $('Code: Clean Body').item.json.from_email }}>\\nSubject: {{ $('Code: Clean Body').item.json.subject }}\\nLabel: {{ $('AI Agent').item.json.output.gmail_label }}\\n\\n{{ $('AI Agent').item.json.output.summary }}\\n\\n{{ $('AI Agent').item.json.output.needs_reply ? '📝 Draft created in Gmail.' : 'No reply needed.' }}\\nView thread: https://mail.google.com/mail/u/0/#inbox/{{ $('Code: Clean Body').item.json.thread_id }}\"\n}",
+        "options": {}
+      },
+      "id": "node-008-slack-webhook",
+      "name": "Slack: Webhook Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "__REPLACE_WITH_DISCORD_WEBHOOK_URL__",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"content\": \"New email - priority {{ $('AI Agent').item.json.output.priority }}/5\\nFrom: {{ $('Code: Clean Body').item.json.from_name }} <{{ $('Code: Clean Body').item.json.from_email }}>\\nSubject: {{ $('Code: Clean Body').item.json.subject }}\\nLabel: {{ $('AI Agent').item.json.output.gmail_label }}\\n\\n{{ $('AI Agent').item.json.output.summary }}\\n\\n{{ $('AI Agent').item.json.output.needs_reply ? 'Draft created in Gmail.' : 'No reply needed.' }}\\nView thread: https://mail.google.com/mail/u/0/#inbox/{{ $('Code: Clean Body').item.json.thread_id }}\"\n}",
+        "options": {}
+      },
+      "id": "node-008b-discord-webhook",
+      "name": "Discord: Webhook Notification (Fallback)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2340,
+        520
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "resource": "label",
+        "operation": "getAll",
+        "returnAll": true
+      },
+      "id": "node-003c-get-labels",
+      "name": "Gmail: Get Labels",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        980,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "__REBIND_GMAIL_OAUTH__",
+          "name": "Gmail OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-label-name-matches-ai",
+              "leftValue": "={{ $json.name }}",
+              "rightValue": "={{ $(\"AI Agent\").item.json.output.gmail_label }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-003d-if-label-match",
+      "name": "IF: Label Matches AI Choice?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1180,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code: Clean Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Clean Body": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Gmail: Get Labels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail: Add Label": {
+      "main": [
+        [
+          {
+            "node": "IF: Needs Reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Needs Reply?": {
+      "main": [
+        [
+          {
+            "node": "Gmail: Create Draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF: Notify? (no draft)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail: Create Draft": {
+      "main": [
+        [
+          {
+            "node": "IF: Notify? (after draft)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Notify? (after draft)": {
+      "main": [
+        [
+          {
+            "node": "Slack: Webhook Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "IF: Notify? (no draft)": {
+      "main": [
+        [
+          {
+            "node": "Slack: Webhook Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Gmail: Get Labels": {
+      "main": [
+        [
+          {
+            "node": "IF: Label Matches AI Choice?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Label Matches AI Choice?": {
+      "main": [
+        [
+          {
+            "node": "Gmail: Add Label",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
